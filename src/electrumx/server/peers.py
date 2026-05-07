@@ -91,6 +91,9 @@ class PeerManager:
         self.recent_peer_adds = {}
         # refreshed
         self.blacklist = set()
+        # Per-bucket asyncio locks to prevent race conditions when
+        # verifying multiple peers from the same IP bucket concurrently.
+        self._bucket_locks = defaultdict(asyncio.Lock)
 
     def _my_clearnet_peer(self):
         '''Returns the clearnet peer representing this server, if any.'''
@@ -356,28 +359,29 @@ class PeerManager:
         if self._is_blacklisted(peer):
             raise BadPeerError('blacklisted')
 
-        # Bucket good recent peers; forbid many servers from similar IPs
-        # FIXME there's a race here, when verifying multiple peers
-        #       that belong to the same bucket ~simultaneously
-        recent_peers = self._get_recent_good_peers()
-        if peer in recent_peers:
-            recent_peers.remove(peer)
-        onion_peers = []
-        buckets = defaultdict(list)
-        for other_peer in recent_peers:
-            if other_peer.is_tor:
-                onion_peers.append(other_peer)
+        # Bucket good recent peers; forbid many servers from similar IPs.
+        # Protected by per-bucket lock to prevent race conditions when
+        # verifying multiple peers from the same IP bucket concurrently.
+        bucket = peer.bucket_for_internal_purposes() if not peer.is_tor else 'onion'
+        async with self._bucket_locks[bucket]:
+            recent_peers = self._get_recent_good_peers()
+            if peer in recent_peers:
+                recent_peers.remove(peer)
+            onion_peers = []
+            buckets = defaultdict(list)
+            for other_peer in recent_peers:
+                if other_peer.is_tor:
+                    onion_peers.append(other_peer)
+                else:
+                    buckets[other_peer.bucket_for_internal_purposes()].append(other_peer)
+            if peer.is_tor:
+                # keep number of onion peers below half of all peers,
+                # but up to 100 is OK regardless
+                if len(onion_peers) > len(recent_peers) // 2 >= 100:
+                    raise BadPeerError('too many onion peers already')
             else:
-                buckets[other_peer.bucket_for_internal_purposes()].append(other_peer)
-        if peer.is_tor:
-            # keep number of onion peers below half of all peers,
-            # but up to 100 is OK regardless
-            if len(onion_peers) > len(recent_peers) // 2 >= 100:
-                raise BadPeerError('too many onion peers already')
-        else:
-            bucket = peer.bucket_for_internal_purposes()
-            if buckets[bucket]:
-                raise BadPeerError(f'too many peers already in bucket {bucket}')
+                if buckets[bucket]:
+                    raise BadPeerError(f'too many peers already in bucket {bucket}')
 
         # server.version goes first
         message = 'server.version'

@@ -76,7 +76,9 @@ class Prefetcher:
                 self.logger.info(f'cancelled; prefetcher stopping {e}')
                 raise
             except Exception:
-                self.logger.exception(f'ignoring unexpected exception')
+                self.logger.exception(
+                    f'unexpected error in prefetcher - this may indicate a bug'
+                )
 
     def get_prefetched_blocks(self) -> Sequence[bytes]:
         '''Called by block processor when it is processing queued blocks.'''
