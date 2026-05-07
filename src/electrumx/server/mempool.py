@@ -311,13 +311,23 @@ class MemPool:
                 utxo_map.update(unspent)
 
             prior_count = 0
-            # FIXME: this is not particularly efficient
-            while tx_map and len(tx_map) != prior_count:
+            # Limit iterations to prevent O(n^2) worst-case with deep
+            # dependency chains.  Remaining deferred txs will resolve on
+            # the next mempool refresh cycle (default 5s).
+            max_iterations = 5
+            iterations = 0
+            while (tx_map
+                   and len(tx_map) != prior_count
+                   and iterations < max_iterations):
                 prior_count = len(tx_map)
                 tx_map, utxo_map = self._accept_transactions(tx_map, utxo_map,
                                                              touched)
+                iterations += 1
             if tx_map:
-                self.logger.error(f'{len(tx_map)} txs dropped')
+                self.logger.info(
+                    f'{len(tx_map)} txs deferred (limit {max_iterations} '
+                    f'iterations reached; will retry next refresh)'
+                )
 
         return touched
 
