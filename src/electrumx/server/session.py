@@ -158,15 +158,10 @@ class SessionManager:
         self.start_time = time.time()
         self._method_counts = defaultdict(int)
         self._reorg_count = 0
-        self._history_cache = LRUCache(maxsize=1000)
-        self._txids_cache = LRUCache(maxsize=1000)
-        # Really a MerkleCache cache
-        self._merkle_txid_cache = LRUCache(maxsize=1000)
-        self.estimatefee_cache = LRUCache(maxsize=1000)
-        self.notified_height = None
-        self.hsub_results = None
         self._task_group = OldTaskGroup()
         self._sslc = None
+        self.notified_height = None
+        self.hsub_results = None
         # Event triggered when electrumx is listening for incoming requests.
         self.server_listening = Event()
         self.session_event = Event()
@@ -177,6 +172,12 @@ class SessionManager:
                 'debug_memusage_get_random_backref_chain'.split())
         LocalRPC.request_handlers = {cmd: getattr(self, 'rpc_' + cmd)
                                      for cmd in cmds}
+
+        # Caches for history, txids, merkle proofs, and fee estimates
+        self._history_cache = LRUCache(maxsize=self.env.cache_size)
+        self._txids_cache = LRUCache(maxsize=self.env.cache_size)
+        self._merkle_txid_cache = LRUCache(maxsize=self.env.cache_size)
+        self.estimatefee_cache = LRUCache(maxsize=self.env.cache_size)
 
     def _ssl_context(self):
         if self._sslc is None:

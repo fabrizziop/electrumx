@@ -161,6 +161,8 @@ class PeerManager:
         while True:
             try:
                 self.blacklist = await read_blacklist()
+            except BaseException:
+                raise
             except Exception as e:
                 self.logger.error(f'could not retrieve blacklist from {url}: {e}')
             else:
