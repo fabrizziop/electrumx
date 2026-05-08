@@ -557,7 +557,7 @@ class PeerManager:
             permit = self._permit_new_onion_peer(now)
             reason = 'rate limiting'
         else:
-            getaddrinfo = asyncio.get_event_loop().getaddrinfo
+            getaddrinfo = asyncio.get_running_loop().getaddrinfo
             try:
                 infos = await getaddrinfo(host, 80, type=socket.SOCK_STREAM)
             except socket.gaierror:
