@@ -580,4 +580,4 @@ async def test_dropped_txs(caplog):
             await event.wait()
             await group.cancel_remaining()
 
-    assert in_caplog(caplog, 'txs dropped')
+    assert in_caplog(caplog, 'txs deferred')
