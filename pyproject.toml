@@ -11,7 +11,7 @@ description = "Server implementation for the Electrum protocol"
 keywords = ["asyncio", "bitcoin", "electrum", "electrum-server"]
 readme = "README.md"
 license = {'file'="LICENSE"}
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "aiorpcx[ws]>=0.25.0,<0.26",
     "attrs",  # TODO try to use stdlib dataclasses instead
@@ -24,7 +24,9 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Natural Language :: English",
     "Operating System :: Unix",
-    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Database",
     "Topic :: Internet",
 ]

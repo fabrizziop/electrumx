@@ -13,7 +13,7 @@ from electrumx.server.mempool import MemPool, MemPoolAPI
 from electrumx.lib.coins import BitcoinCash
 from electrumx.lib.hash import HASHX_LEN, hex_str_to_hash, hash_to_hex_str
 from electrumx.lib.tx import Tx, TxInput, TxOutput
-from electrumx.lib.util import OldTaskGroup
+import asyncio
 
 
 coin = BitcoinCash
@@ -279,10 +279,13 @@ async def test_keep_synchronized(caplog):
     mempool = MemPool(coin, api)
     event = Event()
     with caplog.at_level(logging.INFO):
-        async with OldTaskGroup() as group:
-            await group.spawn(mempool.keep_synchronized, event)
-            await event.wait()
-            await group.cancel_remaining()
+        task = asyncio.create_task(mempool.keep_synchronized(event))
+        await event.wait()
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
     assert in_caplog(caplog, 'beginning processing of daemon mempool')
     assert in_caplog(caplog, 'compact fee histogram')
@@ -298,10 +301,13 @@ async def test_balance_delta():
     api.initialize()
     mempool = MemPool(coin, api)
     event = Event()
-    async with OldTaskGroup() as group:
-        await group.spawn(mempool.keep_synchronized, event)
-        await event.wait()
-        await group.cancel_remaining()
+    task = asyncio.create_task(mempool.keep_synchronized(event))
+    await event.wait()
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
 
     # Check the default dict is handled properly
     prior_len = len(mempool.hashXs)
@@ -321,10 +327,13 @@ async def test_compact_fee_histogram():
     api.initialize()
     mempool = MemPool(coin, api)
     event = Event()
-    async with OldTaskGroup() as group:
-        await group.spawn(mempool.keep_synchronized, event)
-        await event.wait()
-        await group.cancel_remaining()
+    task = asyncio.create_task(mempool.keep_synchronized(event))
+    await event.wait()
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
 
     histogram = await mempool.compact_fee_histogram()
     assert histogram == []
@@ -375,10 +384,13 @@ async def test_potential_spends():
     api.initialize()
     mempool = MemPool(coin, api)
     event = Event()
-    async with OldTaskGroup() as group:
-        await group.spawn(mempool.keep_synchronized, event)
-        await event.wait()
-        await group.cancel_remaining()
+    task = asyncio.create_task(mempool.keep_synchronized(event))
+    await event.wait()
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
 
     # Check the default dict is handled properly
     prior_len = len(mempool.hashXs)
@@ -410,10 +422,13 @@ async def test_transaction_summaries(caplog):
     mempool = MemPool(coin, api)
     event = Event()
     with caplog.at_level(logging.INFO):
-        async with OldTaskGroup() as group:
-            await group.spawn(mempool.keep_synchronized, event)
-            await event.wait()
-            await group.cancel_remaining()
+        task = asyncio.create_task(mempool.keep_synchronized(event))
+        await event.wait()
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
     # Check the default dict is handled properly
     prior_len = len(mempool.hashXs)
@@ -430,10 +445,13 @@ async def test_unordered_UTXOs():
     api.initialize()
     mempool = MemPool(coin, api)
     event = Event()
-    async with OldTaskGroup() as group:
-        await group.spawn(mempool.keep_synchronized, event)
-        await event.wait()
-        await group.cancel_remaining()
+    task = asyncio.create_task(mempool.keep_synchronized(event))
+    await event.wait()
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
 
     # Check the default dict is handled properly
     prior_len = len(mempool.hashXs)
@@ -457,26 +475,29 @@ async def test_mempool_removals():
     api.initialize()
     mempool = MemPool(coin, api, refresh_secs=0.01)
     event = Event()
-    async with OldTaskGroup() as group:
-        await group.spawn(mempool.keep_synchronized, event)
-        await event.wait()
-        # Remove half the TXs from the mempool
-        start = len(api.ordered_adds) // 2
-        for tx_hash in api.ordered_adds[start:]:
-            del api.txs[tx_hash]
-            del api.raw_txs[tx_hash]
-        await event.wait()
-        await _test_summaries(mempool, api)
-        # Removed hashXs should have key destroyed
-        assert all(mempool.hashXs.values())
-        # Remove the rest
-        api.txs.clear()
-        api.raw_txs.clear()
-        await event.wait()
-        await _test_summaries(mempool, api)
-        assert not mempool.hashXs
+    task = asyncio.create_task(mempool.keep_synchronized(event))
+    await event.wait()
+    # Remove half the TXs from the mempool
+    start = len(api.ordered_adds) // 2
+    for tx_hash in api.ordered_adds[start:]:
+        del api.txs[tx_hash]
+        del api.raw_txs[tx_hash]
+    await event.wait()
+    await _test_summaries(mempool, api)
+    # Removed hashXs should have key destroyed
+    assert all(mempool.hashXs.values())
+    # Remove the rest
+    api.txs.clear()
+    api.raw_txs.clear()
+    await event.wait()
+    await _test_summaries(mempool, api)
+    assert not mempool.hashXs
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
         assert not mempool.txs
-        await group.cancel_remaining()
 
 
 @pytest.mark.asyncio
@@ -487,11 +508,14 @@ async def test_daemon_drops_txs():
     api.initialize()
     mempool = MemPool(coin, api, refresh_secs=0.01)
     event = Event()
-    async with OldTaskGroup() as group:
-        await group.spawn(mempool.keep_synchronized, event)
-        await event.wait()
-        await _test_summaries(mempool, api)
-        await group.cancel_remaining()
+    task = asyncio.create_task(mempool.keep_synchronized(event))
+    await event.wait()
+    await _test_summaries(mempool, api)
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
 
 
 @pytest.mark.asyncio
@@ -515,52 +539,55 @@ async def test_notifications(caplog):
 
     caplog.set_level(logging.DEBUG)
 
-    async with OldTaskGroup() as group:
-        # First batch enters the mempool
-        api.raw_txs = {hash: raw_txs[hash] for hash in first_hashes}
-        api.txs = {hash: txs[hash] for hash in first_hashes}
-        first_utxos = api.mempool_utxos()
-        first_spends = api.mempool_spends()
-        await group.spawn(mempool.keep_synchronized, event)
+    task = asyncio.create_task(mempool.keep_synchronized(event))
+    # First batch enters the mempool
+    api.raw_txs = {hash: raw_txs[hash] for hash in first_hashes}
+    api.txs = {hash: txs[hash] for hash in first_hashes}
+    first_utxos = api.mempool_utxos()
+    first_spends = api.mempool_spends()
+    await event.wait()
+    assert len(api.on_mempool_calls) == 1
+    touched, height = api.on_mempool_calls[0]
+    assert height == api._height == api._db_height == api._cached_height
+    assert touched == first_touched
+    # Second batch enters the mempool
+    api.raw_txs = raw_txs
+    api.txs = txs
+    await event.wait()
+    assert len(api.on_mempool_calls) == 2
+    touched, height = api.on_mempool_calls[1]
+    assert height == api._height == api._db_height == api._cached_height
+    # Touched is incremental
+    assert touched == second_touched
+    # Block found; first half confirm
+    new_height = 2
+    api._height = new_height
+    api.raw_txs = {hash: raw_txs[hash] for hash in second_hashes}
+    api.txs = {hash: txs[hash] for hash in second_hashes}
+    # Delay the DB update
+    assert not in_caplog(caplog, 'waiting for DB to sync')
+    async with ignore_after(max(mempool.refresh_secs * 2, 0.5)):
         await event.wait()
-        assert len(api.on_mempool_calls) == 1
-        touched, height = api.on_mempool_calls[0]
-        assert height == api._height == api._db_height == api._cached_height
-        assert touched == first_touched
-        # Second batch enters the mempool
-        api.raw_txs = raw_txs
-        api.txs = txs
-        await event.wait()
-        assert len(api.on_mempool_calls) == 2
-        touched, height = api.on_mempool_calls[1]
-        assert height == api._height == api._db_height == api._cached_height
-        # Touched is incremental
-        assert touched == second_touched
-        # Block found; first half confirm
-        new_height = 2
-        api._height = new_height
-        api.raw_txs = {hash: raw_txs[hash] for hash in second_hashes}
-        api.txs = {hash: txs[hash] for hash in second_hashes}
-        # Delay the DB update
-        assert not in_caplog(caplog, 'waiting for DB to sync')
-        async with ignore_after(max(mempool.refresh_secs * 2, 0.5)):
-            await event.wait()
-        assert in_caplog(caplog, 'waiting for DB to sync')
-        assert len(api.on_mempool_calls) == 2
-        assert not event.is_set()
-        assert api._height == api._cached_height == new_height
-        assert touched == second_touched
-        # Now update the DB
-        api.db_utxos.update(first_utxos)
-        api._db_height = new_height
-        for spend in first_spends:
-            del api.db_utxos[spend]
-        await event.wait()
-        assert len(api.on_mempool_calls) == 3
-        touched, height = api.on_mempool_calls[2]
-        assert height == api._db_height == new_height
-        assert touched == first_touched
-        await group.cancel_remaining()
+    assert in_caplog(caplog, 'waiting for DB to sync')
+    assert len(api.on_mempool_calls) == 2
+    assert not event.is_set()
+    assert api._height == api._cached_height == new_height
+    assert touched == second_touched
+    # Now update the DB
+    api.db_utxos.update(first_utxos)
+    api._db_height = new_height
+    for spend in first_spends:
+        del api.db_utxos[spend]
+    await event.wait()
+    assert len(api.on_mempool_calls) == 3
+    touched, height = api.on_mempool_calls[2]
+    assert height == api._db_height == new_height
+    assert touched == first_touched
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
 
 
 @pytest.mark.asyncio
@@ -575,9 +602,12 @@ async def test_dropped_txs(caplog):
             del api.txs[prev_hash]
 
     with caplog.at_level(logging.INFO):
-        async with OldTaskGroup() as group:
-            await group.spawn(mempool.keep_synchronized, event)
-            await event.wait()
-            await group.cancel_remaining()
+        task = asyncio.create_task(mempool.keep_synchronized(event))
+        await event.wait()
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
     assert in_caplog(caplog, 'txs deferred')

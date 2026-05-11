@@ -373,26 +373,59 @@ def pack_varbytes(data):
     return pack_varint(len(data)) + data
 
 
-class OldTaskGroup(aiorpcx.TaskGroup):
-    """Automatically raises exceptions on join; as in aiorpcx prior to version 0.20"""
-    async def join(self):
-        if self._wait is all:
-            exc = False
-            try:
-                async for task in self:
-                    if not task.cancelled():
-                        task.result()
-            except BaseException:  # including asyncio.CancelledError
-                exc = True
-                raise
-            finally:
-                if exc:
-                    await self.cancel_remaining()
-                await super().join()
-        else:
-            await super().join()
-            if self.completed:
-                self.completed.result()
+class TaskGroup:
+    """A simple task group that uses asyncio.create_task().
+
+    Provides a compatible interface for long-running task groups
+    that need to spawn tasks and track them for cleanup.
+
+    Compatible with OldTaskGroup.spawn(coro, *args) — accepts both
+    a bare coroutine and a callable with arguments.
+    """
+    def __init__(self):
+        self._tasks: set[asyncio.Task] = set()
+        self._joined = False
+
+    @property
+    def joined(self) -> bool:
+        return self._joined
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        await self.cancel_remaining()
+
+    def spawn(self, coro, *args) -> asyncio.Task:
+        """Spawn a coroutine or callable(args) as a task and track it.
+
+        Accepts both:
+          - spawn(coro)          — a bare coroutine
+          - spawn(func, arg1, ..) — a callable with arguments (OldTaskGroup compat)
+        """
+        if self._joined:
+            raise RuntimeError("cannot spawn on a joined task group")
+        # Resolve callable -> coroutine if needed
+        if args:
+            coro = coro(*args)
+        elif not asyncio.iscoroutine(coro):
+            raise TypeError(
+                f"spawn() expected a coroutine, got {type(coro).__name__}"
+            )
+        task = asyncio.create_task(coro)
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        return task
+
+    async def cancel_remaining(self):
+        """Cancel all remaining tasks."""
+        self._joined = True
+        for task in list(self._tasks):
+            task.cancel()
+        if self._tasks:
+            await asyncio.gather(*self._tasks, return_exceptions=True)
+        self._tasks.clear()
+
 
 
 # We monkey-patch aiorpcx TimeoutAfter (used by timeout_after and ignore_after API),

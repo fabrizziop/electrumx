@@ -415,3 +415,7 @@ def test_ban_versions():
 def test_coin_class_provided():
     e = Env(lib_coins.BitcoinSV)
     assert e.coin == lib_coins.BitcoinSV
+
+
+def test_CACHE_SIZE():
+    assert_integer('CACHE_SIZE', 'cache_size', 10000, min_value=100, max_value=100000)
