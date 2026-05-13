@@ -857,7 +857,7 @@ class SessionManager:
             for hashX in set(cache).intersection(touched):
                 del cache[hashX]
 
-        for session in self.sessions:
+        for session in list(self.sessions):
             if self._task_group.joined:  # this can happen during shutdown
                 self.logger.warning(f"task group already terminated. not notifying sessions.")
                 return
