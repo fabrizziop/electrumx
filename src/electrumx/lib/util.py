@@ -394,7 +394,13 @@ class TaskGroup:
         return self
 
     async def __aexit__(self, *exc):
-        await self.cancel_remaining()
+        # Only cancel remaining tasks if an exception occurred.
+        # When exiting normally, let tasks complete on their own.
+        # Callers that need immediate cancellation (e.g. infinite-loop
+        # background tasks) should spawn them with asyncio.create_task()
+        # outside the group's lifecycle instead.
+        if exc[0] is not None:
+            await self.cancel_remaining()
 
     def spawn(self, coro, *args) -> asyncio.Task:
         """Spawn a coroutine or callable(args) as a task and track it.

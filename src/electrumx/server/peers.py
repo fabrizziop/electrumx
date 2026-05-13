@@ -242,7 +242,9 @@ class PeerManager:
                 self.logger.info(f'accepted new peer {peer} from {source}')
                 peer.retry_event = Event()
                 self.peers.add(peer)
-                await self.group.spawn(self._monitor_peer(peer))
+                # Spawn outside the TaskGroup lifecycle — the group's
+                # __aexit__ would cancel these tasks before they run.
+                asyncio.create_task(self._monitor_peer(peer))
 
         return True
 
