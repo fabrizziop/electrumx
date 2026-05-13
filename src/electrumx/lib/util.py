@@ -407,6 +407,7 @@ class TaskGroup:
 
         Accepts both:
           - spawn(coro)          — a bare coroutine
+          - spawn(method)        — a callable with no args (e.g. event.wait)
           - spawn(func, arg1, ..) — a callable with arguments (OldTaskGroup compat)
         """
         if self._joined:
@@ -414,6 +415,8 @@ class TaskGroup:
         # Resolve callable -> coroutine if needed
         if args:
             coro = coro(*args)
+        elif not asyncio.iscoroutine(coro) and callable(coro):
+            coro = coro()
         elif not asyncio.iscoroutine(coro):
             raise TypeError(
                 f"spawn() expected a coroutine, got {type(coro).__name__}"
