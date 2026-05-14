@@ -10,6 +10,7 @@
 import itertools
 import time
 from abc import ABC, abstractmethod
+import asyncio
 from asyncio import Lock
 from collections import defaultdict
 from typing import Sequence, Tuple, TYPE_CHECKING, Type, Dict, Optional, Set
@@ -20,7 +21,7 @@ from aiorpcx import run_in_thread, sleep
 
 from electrumx.lib.hash import hash_to_hex_str, hex_str_to_hash
 from electrumx.lib.tx import SkipTxDeserialize
-from electrumx.lib.util import class_logger, chunks, OldTaskGroup
+from electrumx.lib.util import class_logger, chunks, TaskGroup
 from electrumx.server.db import UTXO
 
 if TYPE_CHECKING:
@@ -296,17 +297,16 @@ class MemPool:
         # Process new transactions
         new_hashes = list(all_hashes.difference(txs))
         if new_hashes:
-            group = OldTaskGroup()
-            for hashes in chunks(new_hashes, 200):
-                coro = self._fetch_and_accept(hashes, all_hashes, touched)
-                await group.spawn(coro)
+            results = await asyncio.gather(*[
+                self._fetch_and_accept(hashes, all_hashes, touched)
+                for hashes in chunks(new_hashes, 200)
+            ])
             if mempool_height != self.api.db_height():
                 raise DBSyncError
 
             tx_map = {}
             utxo_map = {}
-            async for task in group:
-                deferred, unspent = task.result()
+            for deferred, unspent in results:
                 tx_map.update(deferred)
                 utxo_map.update(unspent)
 
@@ -390,10 +390,10 @@ class MemPool:
 
     async def keep_synchronized(self, synchronized_event):
         '''Keep the mempool synchronized with the daemon.'''
-        async with OldTaskGroup() as group:
-            await group.spawn(self._refresh_hashes(synchronized_event))
-            await group.spawn(self._refresh_histogram(synchronized_event))
-            await group.spawn(self._logging(synchronized_event))
+        async with asyncio.TaskGroup() as group:
+            group.create_task(self._refresh_hashes(synchronized_event))
+            group.create_task(self._refresh_histogram(synchronized_event))
+            group.create_task(self._logging(synchronized_event))
 
     async def balance_delta(self, hashX):
         '''Return the unconfirmed amount in the mempool for hashX.

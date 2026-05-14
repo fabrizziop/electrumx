@@ -111,8 +111,8 @@ class PaddedRSTransport(RSTransport):
 
     def connection_made(self, transport: asyncio.BaseTransport):
         super().connection_made(transport)
-        coro = self.session.taskgroup.spawn(self._poll_sbuffer())
-        self._sbuffer_task = self.loop.create_task(coro)
+        # spawn() already returns an asyncio.Task — no need for create_task()
+        self._sbuffer_task = self.session.taskgroup.spawn(self._poll_sbuffer)
 
     async def close(self, *args, **kwargs):
         '''Close the connection and return when closed.'''

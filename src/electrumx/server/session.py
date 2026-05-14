@@ -29,7 +29,7 @@ from aiorpcx import (Event, JSONRPCAutoDetect, JSONRPCConnection,
 import electrumx
 import electrumx.lib.util as util
 from electrumx.lib.lrucache import LRUCache
-from electrumx.lib.util import OldTaskGroup, is_hex_str
+from electrumx.lib.util import TaskGroup, is_hex_str
 from electrumx.lib.hash import (HASHX_LEN, Base58Error, hash_to_hex_str,
                                 hex_str_to_hash, sha256, double_sha256)
 from electrumx.lib.merkle import MerkleCache
@@ -158,15 +158,10 @@ class SessionManager:
         self.start_time = time.time()
         self._method_counts = defaultdict(int)
         self._reorg_count = 0
-        self._history_cache = LRUCache(maxsize=1000)
-        self._txids_cache = LRUCache(maxsize=1000)
-        # Really a MerkleCache cache
-        self._merkle_txid_cache = LRUCache(maxsize=1000)
-        self.estimatefee_cache = LRUCache(maxsize=1000)
+        self._task_group = TaskGroup()
+        self._sslc = None
         self.notified_height = None
         self.hsub_results = None
-        self._task_group = OldTaskGroup()
-        self._sslc = None
         # Event triggered when electrumx is listening for incoming requests.
         self.server_listening = Event()
         self.session_event = Event()
@@ -177,6 +172,12 @@ class SessionManager:
                 'debug_memusage_get_random_backref_chain'.split())
         LocalRPC.request_handlers = {cmd: getattr(self, 'rpc_' + cmd)
                                      for cmd in cmds}
+
+        # Caches for history, txids, merkle proofs, and fee estimates
+        self._history_cache = LRUCache(maxsize=self.env.cache_size)
+        self._txids_cache = LRUCache(maxsize=self.env.cache_size)
+        self._merkle_txid_cache = LRUCache(maxsize=self.env.cache_size)
+        self.estimatefee_cache = LRUCache(maxsize=self.env.cache_size)
 
     def _ssl_context(self):
         if self._sslc is None:
@@ -698,16 +699,16 @@ class SessionManager:
             # note: only best-effort. sessions that are still doing early-handshake are not yet put
             #       into the sessions dict.
             self.logger.info(f'closing {len(self.sessions):,d} active sessions')
-            async with OldTaskGroup() as group:
+            async with asyncio.TaskGroup() as group:
                 for session in list(self.sessions):
-                    await group.spawn(session.close(force_after=1))
+                    group.create_task(session.close(force_after=1))
             # Finally, wait for servers to be cleaned up and remove servers
             self.logger.info(f"waiting for all server's resources to close")
             try:
                 async with timeout_after(3):
-                    async with OldTaskGroup() as group:
+                    async with asyncio.TaskGroup() as group:
                         for server in self.servers.values():
-                            await group.spawn(server.wait_closed())
+                            group.create_task(server.wait_closed())
             except TaskTimeout:
                 self.logger.warning('timed out waiting for server resources to close')
             servers_to_remove = list(self.servers.keys())
@@ -856,7 +857,7 @@ class SessionManager:
             for hashX in set(cache).intersection(touched):
                 del cache[hashX]
 
-        for session in self.sessions:
+        for session in list(self.sessions):
             if self._task_group.joined:  # this can happen during shutdown
                 self.logger.warning(f"task group already terminated. not notifying sessions.")
                 return
@@ -907,10 +908,10 @@ class SessionManager:
 
 
 class RPCSessionWithTaskGroup(RPCSession):
-    def __init__(self, *args, manager_taskgroup: OldTaskGroup, **kwargs):
+    def __init__(self, *args, manager_taskgroup: TaskGroup, **kwargs):
         RPCSession.__init__(self, *args, **kwargs)
         self._manager_taskgroup = manager_taskgroup
-        self.taskgroup = OldTaskGroup()
+        self.taskgroup = TaskGroup()
         asyncio.get_event_loop().create_task(
             self._start_main_loop())
 

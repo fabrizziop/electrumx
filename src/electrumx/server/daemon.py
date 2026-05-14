@@ -51,8 +51,6 @@ class Daemon:
     RPC_IN_WARMUP = -28
     RPC_PARSE_ERROR = -32700
 
-    id_counter = itertools.count()
-
     def __init__(
             self,
             coin: Type['Coin'],
@@ -64,6 +62,7 @@ class Daemon:
     ):
         self.coin = coin
         self.logger = class_logger(__name__, self.__class__.__name__)
+        self.id_counter = itertools.count()
         self.url_index = None
         self.urls = []
         self.set_url(url)

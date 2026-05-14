@@ -5,13 +5,14 @@
 # See the file "LICENCE" for information about the copyright
 # and warranty status of this software.
 
+import asyncio
 from asyncio import Event
 
 from aiorpcx import _version as aiorpcx_version
 
 import electrumx
 from electrumx.lib.server_base import ServerBase
-from electrumx.lib.util import version_string, OldTaskGroup
+from electrumx.lib.util import version_string, TaskGroup
 from electrumx.server.db import DB
 from electrumx.server.mempool import MemPool, MemPoolAPI
 from electrumx.server.session import SessionManager
@@ -138,10 +139,10 @@ class Controller(ServerBase):
 
             async def wait_for_catchup():
                 await caught_up_event.wait()
-                await group.spawn(db.populate_header_merkle_cache())
-                await group.spawn(mempool.keep_synchronized(mempool_event))
+                await db.populate_header_merkle_cache()
+                await mempool.keep_synchronized(mempool_event)
 
-            async with OldTaskGroup() as group:
-                await group.spawn(session_mgr.serve(notifications, mempool_event))
-                await group.spawn(bp.fetch_and_process_blocks(caught_up_event))
-                await group.spawn(wait_for_catchup())
+            async with asyncio.TaskGroup() as group:
+                group.create_task(session_mgr.serve(notifications, mempool_event))
+                group.create_task(bp.fetch_and_process_blocks(caught_up_event))
+                group.create_task(wait_for_catchup())

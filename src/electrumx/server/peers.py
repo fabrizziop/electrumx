@@ -24,7 +24,7 @@ from aiorpcx import (Event, Notification, RPCSession, SOCKSError,
 from aiorpcx.jsonrpc import CodeMessageError
 
 from electrumx.lib.peer import Peer
-from electrumx.lib.util import class_logger, json_deserialize, OldTaskGroup
+from electrumx.lib.util import class_logger, json_deserialize, TaskGroup
 from electrumx.server.session import RPCSessionWithTaskGroup
 from electrumx.server.transport import PaddedRSTransport
 
@@ -87,7 +87,7 @@ class PeerManager:
         self.peers = set()
         self.permit_onion_peer_time = time.time()
         self.proxy = None
-        self.group = OldTaskGroup()
+        self.group = TaskGroup()
         self.recent_peer_adds = {}
         # refreshed
         self.blacklist = set()
@@ -242,7 +242,9 @@ class PeerManager:
                 self.logger.info(f'accepted new peer {peer} from {source}')
                 peer.retry_event = Event()
                 self.peers.add(peer)
-                await self.group.spawn(self._monitor_peer(peer))
+                # Spawn outside the TaskGroup lifecycle — the group's
+                # __aexit__ would cancel these tasks before they run.
+                asyncio.create_task(self._monitor_peer(peer))
 
         return True
 
@@ -399,11 +401,11 @@ class PeerManager:
         peer.server_version = server_version
         peer.features['server_version'] = server_version
 
-        async with OldTaskGroup() as g:
-            await g.spawn(self._send_headers_subscribe(session))
-            await g.spawn(self._send_server_features(session, peer))
-            peers_task = await g.spawn(self._send_peers_subscribe
-                                       (session, peer))
+        async with TaskGroup() as g:
+            g.spawn(self._send_headers_subscribe(session))
+            g.spawn(self._send_server_features(session, peer))
+            peers_task = g.spawn(self._send_peers_subscribe
+                                 (session, peer))
 
         # Process reported peers if remote peer is good
         peers = peers_task.result()
@@ -555,7 +557,7 @@ class PeerManager:
             permit = self._permit_new_onion_peer(now)
             reason = 'rate limiting'
         else:
-            getaddrinfo = asyncio.get_event_loop().getaddrinfo
+            getaddrinfo = asyncio.get_running_loop().getaddrinfo
             try:
                 infos = await getaddrinfo(host, 80, type=socket.SOCK_STREAM)
             except socket.gaierror:

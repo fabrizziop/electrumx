@@ -17,3 +17,6 @@
 /src/e_x.egg-info/
 /electrumx.egg-info/
 /e_x.egg-info/
+
+# Local review notes
+CODE_REVIEW.md

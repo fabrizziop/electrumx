@@ -503,13 +503,16 @@ class DB:
             fs_tx_hash = self.fs_tx_hash
             return [fs_tx_hash(tx_num) for tx_num in tx_nums]
 
-        while True:
+        max_retries = 200
+        for attempt in range(max_retries):
             history = await run_in_thread(read_history)
             if all(hash is not None for hash, height in history):
                 return history
             self.logger.warning(f'limited_history: tx hash '
-                                f'not found (reorg?), retrying...')
+                                f'not found (reorg?), '
+                                f'retry {attempt+1}/{max_retries}')
             await sleep(0.25)
+        raise self.DBError('tx hash not found after retries')
 
     # -- Undo information
 
@@ -763,13 +766,16 @@ class DB:
                 utxos_append(UTXO(tx_num, txout_idx, tx_hash, height, value))
             return utxos
 
-        while True:
+        max_retries = 200
+        for attempt in range(max_retries):
             utxos = await run_in_thread(read_utxos)
             if all(utxo.tx_hash is not None for utxo in utxos):
                 return utxos
             self.logger.warning(f'all_utxos: tx hash not '
-                                f'found (reorg?), retrying...')
+                                f'found (reorg?), '
+                                f'retry {attempt+1}/{max_retries}')
             await sleep(0.25)
+        raise self.DBError('tx hash not found after retries')
 
     async def lookup_utxos(self, prevouts):
         '''For each prevout, lookup it up in the DB and return a (hashX,
