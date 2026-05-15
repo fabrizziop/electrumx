@@ -20,7 +20,7 @@ from functools import partial
 import aiohttp
 from aiorpcx import (Event, Notification, RPCSession, SOCKSError,
                      SOCKSProxy, TaskTimeout, connect_rs,
-                     handler_invocation, ignore_after, sleep)
+                     handler_invocation, ignore_after, sleep, timeout_after)
 from aiorpcx.jsonrpc import CodeMessageError
 
 from electrumx.lib.peer import Peer
@@ -38,6 +38,8 @@ STATUS_DESCS = ('good', 'stale', 'never', 'bad')
 STALE_SECS = 3 * 3600
 WAKEUP_SECS = 300
 PEER_ADD_PAUSE = 600
+# P2-14: Timeout for individual peer verification RPC calls
+PEER_RPC_TIMEOUT = 30  # seconds
 
 
 class BadPeerError(Exception):
@@ -391,12 +393,15 @@ class PeerManager:
                 if buckets[bucket]:
                     raise BadPeerError(f'too many peers already in bucket {bucket}')
 
-        # server.version goes first
+          # server.version goes first
         message = 'server.version'
         try:
-            result = await session.send_request(message, self.server_version_args)
+            result = await timeout_after(PEER_RPC_TIMEOUT,
+                                         session.send_request(message, self.server_version_args))
         except asyncio.CancelledError:
             raise BadPeerError('terminated before server.version response')
+        except TaskTimeout:
+            raise BadPeerError(f'{message} timed out after {PEER_RPC_TIMEOUT}s')
 
         assert_good(message, result, list)
 
@@ -422,13 +427,20 @@ class PeerManager:
             self.logger.info(f'registering ourself with {peer}')
             # We only care to wait for the response
             try:
-                await session.send_request('server.add_peer', [features])
+                await timeout_after(PEER_RPC_TIMEOUT,
+                                    session.send_request('server.add_peer', [features]))
             except asyncio.CancelledError:
                 raise BadPeerError('terminated before server.add_peer response')
+            except TaskTimeout:
+                raise BadPeerError('server.add_peer timed out')
 
     async def _send_headers_subscribe(self, session):
         message = 'blockchain.headers.subscribe'
-        result = await session.send_request(message)
+        try:
+            result = await timeout_after(PEER_RPC_TIMEOUT,
+                                         session.send_request(message))
+        except TaskTimeout:
+            raise BadPeerError(f'{message} timed out')
         assert_good(message, result, dict)
 
         our_height = self.db.db_height
@@ -444,7 +456,11 @@ class PeerManager:
         raw_header = await self.db.raw_header(check_height)
         ours = raw_header.hex()
         message = 'blockchain.block.header'
-        theirs = await session.send_request(message, [check_height])
+        try:
+            theirs = await timeout_after(PEER_RPC_TIMEOUT,
+                                         session.send_request(message, [check_height]))
+        except TaskTimeout:
+            raise BadPeerError(f'{message} timed out')
         assert_good(message, theirs, str)
         if ours != theirs:
             raise BadPeerError(f'our header {ours} and '
@@ -452,7 +468,11 @@ class PeerManager:
 
     async def _send_server_features(self, session, peer):
         message = 'server.features'
-        features = await session.send_request(message)
+        try:
+            features = await timeout_after(PEER_RPC_TIMEOUT,
+                                           session.send_request(message))
+        except TaskTimeout:
+            raise BadPeerError(f'{message} timed out')
         assert_good(message, features, dict)
         features_hosts = features.get('hosts', {})
         assert_good(message, features_hosts, dict)
@@ -466,7 +486,11 @@ class PeerManager:
 
     async def _send_peers_subscribe(self, session, peer):
         message = 'server.peers.subscribe'
-        raw_peers = await session.send_request(message)
+        try:
+            raw_peers = await timeout_after(PEER_RPC_TIMEOUT,
+                                            session.send_request(message))
+        except TaskTimeout:
+            raise BadPeerError(f'{message} timed out')
         assert_good(message, raw_peers, list)
 
         # Check the peers list we got from a remote peer.

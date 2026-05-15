@@ -22,6 +22,7 @@ from electrumx.lib.util import (pack_be_uint16, pack_le_uint64,
 
 if TYPE_CHECKING:
     from electrumx.server.storage import Storage
+    from electrumx.server.env import Env
 
 
 TXNUM_LEN = 5
@@ -37,7 +38,7 @@ class History:
     def __init__(self):
         self.logger = util.class_logger(__name__, self.__class__.__name__)
         # For history compaction
-        self.max_hist_row_entries = 12500
+        self.max_hist_row_entries = 12500  # overridden by open_db from env
         self.unflushed = defaultdict(bytearray)
         self.unflushed_count = 0
         self.flush_count = 0
@@ -45,6 +46,7 @@ class History:
         self.comp_cursor = -1
         self.db_version = max(self.DB_VERSIONS)
         self.upgrade_cursor = -1
+        self.large_hashx_threshold = 4  # overridden by open_db from env
 
         # Key: address_hashX + flush_id
         # Value: sorted "list" of tx_nums in history of hashX
@@ -56,10 +58,16 @@ class History:
             for_sync: bool,
             utxo_flush_count: int,
             compacting: bool,
+            env: Optional['Env'] = None,
     ):
         self.db = db_class('hist', for_sync)
         self.read_state()
         self.clear_excess(utxo_flush_count)
+        # P2-12: Apply configurable compaction settings from env
+        if env is not None:
+            self.env = env
+            self.max_hist_row_entries = env.history_max_row_entries
+            self.large_hashx_threshold = env.large_hashx_threshold
         # An incomplete compaction needs to be cancelled otherwise
         # restarting it will corrupt the history
         if not compacting:
@@ -311,10 +319,11 @@ class History:
                 write_size += len(chunk)
             nrows += 1
 
-        if nrows > 4:
+        if nrows > self.large_hashx_threshold:
             self.logger.info(
                 f'hashX {hash_to_hex_str(hashX)} is large: '
-                f'{nrows:,d} rows'
+                f'{nrows * self.max_hist_row_entries:,d} entries '
+                f'across {nrows:,d} rows'
             )
 
         assert nrows > 0

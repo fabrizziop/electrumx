@@ -170,7 +170,7 @@ class DB:
         # Then history DB
         self.utxo_flush_count = self.history.open_db(self.db_class, for_sync,
                                                      self.utxo_flush_count,
-                                                     compacting)
+                                                     compacting, self.env)
         self.clear_excess_undo_info()
 
         # Read TX counts (requires meta directory)
@@ -503,7 +503,13 @@ class DB:
             fs_tx_hash = self.fs_tx_hash
             return [fs_tx_hash(tx_num) for tx_num in tx_nums]
 
-        max_retries = 200
+        # P2-11: Reduce retries and use exponential backoff.
+        # Original: 200 retries × 0.25s = up to 50s worst case.
+        # New: 20 retries with backoff 0.1→0.2→0.4→…→2.0s = ~30s max,
+        #       but most reorgs resolve in <1s so average is much lower.
+        max_retries = 20
+        base_delay = 0.1  # seconds
+        max_delay = 2.0
         for attempt in range(max_retries):
             history = await run_in_thread(read_history)
             if all(hash is not None for hash, height in history):
@@ -511,7 +517,8 @@ class DB:
             self.logger.warning(f'limited_history: tx hash '
                                 f'not found (reorg?), '
                                 f'retry {attempt+1}/{max_retries}')
-            await sleep(0.25)
+            delay = min(base_delay * (2 ** attempt), max_delay)
+            await sleep(delay)
         raise self.DBError('tx hash not found after retries')
 
     # -- Undo information
@@ -766,7 +773,10 @@ class DB:
                 utxos_append(UTXO(tx_num, txout_idx, tx_hash, height, value))
             return utxos
 
-        max_retries = 200
+        # P2-11: Same retry reduction as limited_history.
+        max_retries = 20
+        base_delay = 0.1
+        max_delay = 2.0
         for attempt in range(max_retries):
             utxos = await run_in_thread(read_utxos)
             if all(utxo.tx_hash is not None for utxo in utxos):
@@ -774,7 +784,8 @@ class DB:
             self.logger.warning(f'all_utxos: tx hash not '
                                 f'found (reorg?), '
                                 f'retry {attempt+1}/{max_retries}')
-            await sleep(0.25)
+            delay = min(base_delay * (2 ** attempt), max_delay)
+            await sleep(delay)
         raise self.DBError('tx hash not found after retries')
 
     async def lookup_utxos(self, prevouts):
