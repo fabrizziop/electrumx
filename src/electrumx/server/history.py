@@ -264,20 +264,17 @@ class History:
 
     def _compact_hashX(self, hashX, hist_map, hist_list,
                        write_items, keys_to_delete):
-        '''Compres history for a hashX.  hist_list is an ordered list of
-        the histories to be compressed.'''
+        '''Compress history for a hashX.  hist_list is an ordered list of
+        the histories to be compressed.
+
+        Processes entries incrementally row-by-row to avoid building one
+        giant in-memory blob for large hashXs.
+        '''
         # History entries (tx numbers) are TXNUM_LEN bytes each.  Distribute
         # over rows of up to 50KB in size.  A fixed row size means
         # future compactions will not need to update the first N - 1
         # rows.
         max_row_size = self.max_hist_row_entries * TXNUM_LEN
-        full_hist = b''.join(hist_list)
-        nrows = (len(full_hist) + max_row_size - 1) // max_row_size
-        if nrows > 4:
-            self.logger.info(
-                f'hashX {hash_to_hex_str(hashX)} is large: '
-                f'{len(full_hist) // TXNUM_LEN:,d} entries across {nrows:,d} rows'
-            )
 
         # Find what history needs to be written, and what keys need to
         # be deleted.  Start by assuming all keys are to be deleted,
@@ -285,16 +282,43 @@ class History:
         # compacted.
         write_size = 0
         keys_to_delete.update(hist_map)
-        for n, chunk in enumerate(util.chunks(full_hist, max_row_size)):
-            key = hashX + pack_be_uint16(n)
+
+        # Build rows incrementally instead of concatenating everything
+        # into one giant blob.  This avoids OOM for large hashXs.
+        row_buf = bytearray()
+        nrows = 0
+        for hist in hist_list:
+            row_buf.extend(hist)
+            while len(row_buf) >= max_row_size:
+                chunk = bytes(row_buf[:max_row_size])
+                row_buf = row_buf[max_row_size:]
+                key = hashX + pack_be_uint16(nrows)
+                if hist_map.get(key) == chunk:
+                    keys_to_delete.discard(key)
+                else:
+                    write_items.append((key, chunk))
+                    write_size += len(chunk)
+                nrows += 1
+
+        # Flush any remaining data as the last row
+        if row_buf:
+            chunk = bytes(row_buf)
+            key = hashX + pack_be_uint16(nrows)
             if hist_map.get(key) == chunk:
-                keys_to_delete.remove(key)
+                keys_to_delete.discard(key)
             else:
                 write_items.append((key, chunk))
                 write_size += len(chunk)
+            nrows += 1
 
-        assert n + 1 == nrows
-        self.comp_flush_count = max(self.comp_flush_count, n)
+        if nrows > 4:
+            self.logger.info(
+                f'hashX {hash_to_hex_str(hashX)} is large: '
+                f'{nrows:,d} rows'
+            )
+
+        assert nrows > 0
+        self.comp_flush_count = max(self.comp_flush_count, nrows - 1)
 
         return write_size
 

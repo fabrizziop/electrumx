@@ -169,7 +169,10 @@ class PeerManager:
                 for peer in self.peers:
                     if self._is_blacklisted(peer):
                         peer.retry_event.set()
-            await sleep(600)
+            try:
+                await sleep(600)
+            except asyncio.CancelledError:
+                raise
 
     def _is_blacklisted(self, peer):
         host = peer.host.lower()
@@ -205,7 +208,10 @@ class PeerManager:
                 self.logger.info(f'detected {proxy}')
                 return
             self.logger.info('no proxy detected, will try later')
-            await sleep(900)
+            try:
+                await sleep(900)
+            except asyncio.CancelledError:
+                raise
 
     async def _note_peers(self, peers, limit=2, check_ports=False, source=None):
         '''Add a limited number of peers that are not already present.'''

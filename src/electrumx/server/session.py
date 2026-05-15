@@ -1182,21 +1182,47 @@ class ElectrumX(SessionBase):
         if touched or (height_changed and self.mempool_statuses):
             changed = {}
 
-            for hashX in touched:
-                alias = self.hashX_subs.get(hashX)
-                if alias:
-                    status = await self.subscription_address_status(hashX)
-                    changed[alias] = status
+            # Parallelize subscription_address_status lookups to reduce
+            # notification latency under heavy load.
+            if touched:
+                tasks = []
+                for hashX in touched:
+                    alias = self.hashX_subs.get(hashX)
+                    if alias:
+                        tasks.append((alias, self.subscription_address_status(hashX)))
+                if tasks:
+                    results = await asyncio.gather(
+                        *(t[1] for t in tasks), return_exceptions=True
+                    )
+                    for (alias, _), result in zip(tasks, results):
+                        if isinstance(result, Exception):
+                            self.logger.warning(
+                                f'subscription_address_status failed for {alias}: {result}'
+                            )
+                        else:
+                            changed[alias] = result
 
             # Check mempool hashXs - the status is a function of the confirmed state of
             # other transactions.
-            mempool_statuses = self.mempool_statuses.copy()
-            for hashX, old_status in mempool_statuses.items():
-                alias = self.hashX_subs.get(hashX)
-                if alias:
-                    status = await self.subscription_address_status(hashX)
-                    if status != old_status:
-                        changed[alias] = status
+            if height_changed and self.mempool_statuses:
+                mempool_statuses = self.mempool_statuses.copy()
+                tasks = []
+                for hashX, old_status in mempool_statuses.items():
+                    alias = self.hashX_subs.get(hashX)
+                    if alias:
+                        tasks.append((alias, old_status,
+                                      self.subscription_address_status(hashX)))
+                if tasks:
+                    results = await asyncio.gather(
+                        *(t[2] for t in tasks), return_exceptions=True
+                    )
+                    for (alias, old_status, _), result in zip(tasks, results):
+                        if isinstance(result, Exception):
+                            self.logger.warning(
+                                f'subscription_address_status failed for mempool {alias}: {result}'
+                            )
+                        elif result != old_status:
+                            changed[alias] = result
 
             method = 'blockchain.scripthash.subscribe'
             for alias, status in changed.items():
