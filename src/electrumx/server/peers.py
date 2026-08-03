@@ -40,6 +40,8 @@ WAKEUP_SECS = 300
 PEER_ADD_PAUSE = 600
 # P2-14: Timeout for individual peer verification RPC calls
 PEER_RPC_TIMEOUT = 30  # seconds
+# Timeout for the TCP/TLS connect step to a peer
+PEER_CONNECT_TIMEOUT = 30  # seconds
 
 
 class BadPeerError(Exception):
@@ -303,14 +305,15 @@ class PeerManager:
             )
             peer_text = f'[{peer}:{port} {kind}]'
             try:
-                async with connect_rs(
-                        peer.host, port,
-                        session_factory=session_factory,
-                        transport=PaddedRSTransport,
-                        **kwargs,
-                ) as session:
-                    session.sent_request_timeout = 120 if peer.is_tor else 30
-                    await self._verify_peer(session, peer)
+                async with timeout_after(PEER_CONNECT_TIMEOUT):
+                    async with connect_rs(
+                            peer.host, port,
+                            session_factory=session_factory,
+                            transport=PaddedRSTransport,
+                            **kwargs,
+                    ) as session:
+                        session.sent_request_timeout = 120 if peer.is_tor else 30
+                        await self._verify_peer(session, peer)
                 is_good = True
                 break
             except BadPeerError as e:
