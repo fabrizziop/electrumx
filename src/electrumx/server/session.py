@@ -1170,6 +1170,12 @@ class ElectrumX(SessionBase):
         except Exception:
             self.logger.exception('unexpected exception notifying client')
 
+    # Max concurrent subscription_address_status calls per _notify_inner.
+    # Each call does thread-pool DB work + mempool lookups; unbounded fan-out
+    # on busy blocks (thousands of subscribed addresses) would overwhelm the
+    # thread pool.
+    _NOTIFY_SEMAPHORE_LIMIT = 25
+
     async def _notify_inner(self, touched, height_changed):
         '''Notify the client about changes to touched addresses (from mempool
         updates or new blocks) and height.
@@ -1182,6 +1188,12 @@ class ElectrumX(SessionBase):
         if touched or (height_changed and self.mempool_statuses):
             changed = {}
 
+            sem = asyncio.Semaphore(self._NOTIFY_SEMAPHORE_LIMIT)
+
+            async def _bounded_status(hashX):
+                async with sem:
+                    return await self.subscription_address_status(hashX)
+
             # Parallelize subscription_address_status lookups to reduce
             # notification latency under heavy load.
             if touched:
@@ -1189,7 +1201,7 @@ class ElectrumX(SessionBase):
                 for hashX in touched:
                     alias = self.hashX_subs.get(hashX)
                     if alias:
-                        tasks.append((alias, self.subscription_address_status(hashX)))
+                        tasks.append((alias, _bounded_status(hashX)))
                 if tasks:
                     results = await asyncio.gather(
                         *(t[1] for t in tasks), return_exceptions=True
@@ -1211,7 +1223,7 @@ class ElectrumX(SessionBase):
                     alias = self.hashX_subs.get(hashX)
                     if alias:
                         tasks.append((alias, old_status,
-                                      self.subscription_address_status(hashX)))
+                                      _bounded_status(hashX)))
                 if tasks:
                     results = await asyncio.gather(
                         *(t[2] for t in tasks), return_exceptions=True

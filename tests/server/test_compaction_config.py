@@ -18,11 +18,9 @@ async def test_env_has_compaction_config():
     env = Env()
     assert hasattr(env, 'history_max_row_entries')
     assert hasattr(env, 'large_hashx_threshold')
-    assert hasattr(env, 'compaction_write_atomic')
     # Defaults
     assert env.history_max_row_entries == 12500
     assert env.large_hashx_threshold == 4
-    assert env.compaction_write_atomic is True
 
 
 @pytest.mark.asyncio
@@ -34,16 +32,12 @@ async def test_env_compaction_config_custom():
     environ['COIN'] = 'BitcoinSV'
     environ['HISTORY_MAX_ROW_ENTRIES'] = '25000'
     environ['LARGE_HASHX_THRESHOLD'] = '8'
-    # Note: env_base.boolean() uses truthy check on string,
-    # so empty string = False, non-empty = True
-    environ['COMPACTION_WRITE_ATOMIC'] = ''
 
     from electrumx.server.env import Env
 
     env = Env()
     assert env.history_max_row_entries == 25000
     assert env.large_hashx_threshold == 8
-    assert env.compaction_write_atomic is False
 
 
 @pytest.mark.asyncio

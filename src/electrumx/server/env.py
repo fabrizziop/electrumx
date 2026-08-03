@@ -78,7 +78,6 @@ class Env(EnvBase):
         self.reorg_limit = self.integer('REORG_LIMIT', self.coin.REORG_LIMIT)
         self.history_max_row_entries = self.integer('HISTORY_MAX_ROW_ENTRIES', 12500)
         self.large_hashx_threshold = self.integer('LARGE_HASHX_THRESHOLD', 4)
-        self.compaction_write_atomic = self.boolean('COMPACTION_WRITE_ATOMIC', True)
         self.daemon_poll_interval_blocks_msec = self.integer('DAEMON_POLL_INTERVAL_BLOCKS', 5000)
         self.daemon_poll_interval_mempool_msec = self.integer('DAEMON_POLL_INTERVAL_MEMPOOL', 5000)
 
